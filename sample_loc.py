@@ -23,13 +23,11 @@ import time
 
 # jax.config.update("jax_debug_nans", True)
 
-def sample_get(model: GSTPP, ts: Float[Array, "T"], ss: Float[Array, "T loc_dim"], mask: Bool[Array, "T"], t0: float, key: Array, num_samples: int, boundary: float, oversample_rate: float):
+def sample_get(model: GSTPP, ts: Float[Array, "T"], ss: Float[Array, "T loc_dim"], mask: Bool[Array, "T"], t0: float, key: Array, num_samples: int):
 
-    dts_samples, loc_sample = model.sample(ts, ss, mask, t0, key, num_samples, boundary, oversample_rate) # 0 - -2
-    dts = ts[1:] - ts[:-1]
-    dts = dts[mask[1:]] # 1 - -1
+    loc_sample = model.sample_loc_cond(ts, ss, mask, t0, key, num_samples) # 0 - -2
     ss = ss[mask][1:] # 
-    return dts_samples, loc_sample, dts, ss
+    return loc_sample, ss
 
 
 setproctitle.setproctitle(args.title)
@@ -58,9 +56,7 @@ model = eqx.tree_deserialise_leaves(args.load_path, model)
 sample_key = jax.random.PRNGKey(69)
 model = jax.tree.map(disable_gradient, model)
 model = eqx.nn.inference_mode(model)
-real_dts = list()
 real_locs = list()
-pred_dts = list()
 pred_locs = list()
 t0 = 0.
 
@@ -74,16 +70,12 @@ for batch in test_loader:
         mask = mask.astype(bool)
         cur_key, sample_key = jax.random.split(sample_key)
         # dts_samples: (T, num_samples) loc_sample: (T, num_samples, loc_dim)   select_dts: (T, )   select_ss: (T, loc_dim)
-        dts_samples, loc_sample, select_dts, select_ss = sample_get(model, ts, ss, mask, t0, cur_key, 5, dt_max, 50.)
-        real_dts.append(select_dts)
+        loc_sample, select_ss = sample_get(model, ts, ss, mask, t0, cur_key, 50)
         real_locs.append(select_ss)
-        pred_dts.append(dts_samples)
         pred_locs.append(loc_sample)
     print(f'Batch finished in {time.time()-start_time} seconds.')
 
-real_dts = jnp.concatenate(real_dts, 0) 
 real_locs = jnp.concatenate(real_locs, 0) # (N, loc_dim)
-pred_dts = jnp.concatenate(pred_dts, 0)
 pred_locs = jnp.concatenate(pred_locs, 0) # (N, num_samples, loc_dim)
 s_std = get_array(s_std)
 s_mean = get_array(s_mean)
@@ -91,5 +83,4 @@ real_locs = real_locs * s_std + s_mean
 pred_locs = pred_locs * s_std + s_mean
 dist = jnp.sqrt(((real_locs[:, None, :]-pred_locs)**2).sum(-1))
 mean_dist = dist.mean((0, 1))
-print(root_mean_squared_error(jnp.broadcast_to(real_dts[:, None], pred_dts.shape).flatten(), pred_dts.flatten()))
 print(mean_dist)

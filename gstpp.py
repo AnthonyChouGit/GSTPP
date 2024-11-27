@@ -9,6 +9,7 @@ import ode
 import jax.numpy as jnp
 from utils import batched_forward, normal_ll, normalize, sample_mix
 from thinning import thinning
+from eval import disable_gradient
 
 class GSTPP(eqx.Module):
     node_loc: jax.Array
@@ -238,6 +239,9 @@ class GSTPP(eqx.Module):
         return loc_samples
     
     def sample(self, ts: Float[Array, "seq_len"], locs: Float[Array, "seq_len loc_dim"], mask: Bool[Array, "seq_len"], t0: float, key: Array, num_samples: int, boundary: float, oversample_rate: float=5.):
+        ts = jax.tree.map(disable_gradient, ts)
+        locs = jax.tree.map(disable_gradient, locs)
+        mask = jax.tree.map(disable_gradient, mask)
         t1 = ts.max() + 1e-5
         key1, key2 = jax.random.split(key)
         ts = ts[mask][:-1]
@@ -246,12 +250,41 @@ class GSTPP(eqx.Module):
         _, afterjumps, _, _ = self.run(ts, locs, mask, t0, t1)
         H, h = afterjumps
         states = (jnp.zeros(H.shape[0]), jnp.zeros(H.shape[0]), H, h)
-        dts, Hs = self._sample_dt(ts, states, num_samples, boundary, key1, oversample_rate) # Hs: (seq_len-1, num_samples, nb_nodes, hdim) dts: (N, num_smaples)
+        states = jax.tree.map(disable_gradient, states)
+        dts, Hs = self._sample_dt(ts, states, num_samples, boundary, key1, oversample_rate) # Hs: (seq_len-1, num_samples, nb_nodes, hdim) dts: (seq_len-1, num_smaples)
+
+        # Padding
+        target_t = ts[:, None]+dts # (seq_len-1, num_smaples)
+        target_t = jnp.concatenate([target_t, jnp.zeros((self.max_len-target_t.shape[0], num_samples))], 0)
+        Hs = jnp.concatenate([Hs, jnp.zeros((self.max_len-Hs.shape[0], *Hs.shape[1:]))], 0)
+
+        loc_samples = self._sample_loc(target_t.flatten(), Hs.reshape((-1, *Hs.shape[-2:])), 1, key2)
+        loc_samples = loc_samples.reshape((-1, num_samples, locs.shape[-1]))
+        loc_samples = loc_samples[:ts.shape[0]]
         
-        with jax.disable_jit():
-            loc_samples = self._sample_loc((ts[:, None]+dts).flatten(), Hs.reshape((-1, Hs.shape[-2], Hs.shape[-1])), 1, key2).squeeze(1) # (N*num_samples, loc_dim)
-        loc_samples = loc_samples.reshape(ts.shape[0], num_samples, -1)
+        # with jax.disable_jit():
+        #     loc_samples = self._sample_loc((ts[:, None]+dts).flatten(), Hs.reshape((-1, Hs.shape[-2], Hs.shape[-1])), 1, key2).squeeze(1) # ((seq_len-1)*num_samples, loc_dim)
+        # loc_samples = loc_samples.reshape(ts.shape[0], num_samples, -1)
         return dts, loc_samples
+    
+    def sample_loc_cond(self, ts: Float[Array, "seq_len"], locs: Float[Array, "seq_len loc_dim"], mask: Bool[Array, "seq_len"], t0: float, key: Array, num_samples: int):
+        locs = jax.tree.map(disable_gradient, locs)
+        mask = jax.tree.map(disable_gradient, mask)
+        ts = ts[mask][:-1]
+        locs = locs[mask][:-1]
+        mask = mask[mask][:-1]
+
+        t1 = ts.max() + 1e-5
+        prejump, _, _, _ = self.run(ts, locs, mask, t0, t1)
+        H, _ = prejump # (T, nb_nodes, hdim) 
+        # Pad H, t
+        # padded_mask = jnp.concatenate([mask, jnp.zeros((self.max_len-mask.shape[0],)).astype(mask.dtype)], 0)
+        padded_H = jnp.concatenate([H, jnp.zeros((self.max_len-H.shape[0], H.shape[1], H.shape[2]))], 0)
+        padded_t = jnp.concatenate([ts, jnp.zeros((self.max_len-ts.shape[0],))], 0)
+
+        loc_samples = self._sample_loc(padded_t, padded_H, num_samples, key) # (max_len, num_samples, loc_dim)
+        loc_samples = loc_samples[:ts.shape[0]]
+        return loc_samples
 
 # Extrapolate energy, Lambda, H and h simultaneously
 @eqx.filter_jit

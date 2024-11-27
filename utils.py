@@ -39,8 +39,8 @@ def lr_schedule(step, warmups, base_rate, training_steps):
 def sample_mix(mu: Float[Array, "nb_nodes hdim"], sigma: Float[Array, "nb_nodes hdim"], log_weights: Float[Array, 'nb_nodes'], num_samples: int, key: Array):
     key1, key2 = jax.random.split(key)
     log_weights = jnp.broadcast_to(log_weights, (num_samples, log_weights.shape[-1]))
-    clusters = jax.random.categorical(key1, log_weights) # (num_samples, )
-    # clusters = log_weights.argmax(-1)
+    # clusters = jax.random.categorical(key1, log_weights) # (num_samples, )
+    clusters = log_weights.argmax(-1)
     mu = mu[clusters]
     sigma = sigma[clusters]
     eps = jax.random.normal(key2, (num_samples, mu.shape[-1]))

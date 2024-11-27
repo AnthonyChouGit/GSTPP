@@ -1,24 +1,24 @@
 import jax
 import torch.utils
 import torch.utils.data
-from gstpp import GSTPP
+# from gstpp import GSTPP
 import equinox as eqx
 import torch
 from data import get_array
 from jaxtyping import Array, Float
 import jax.numpy as jnp
 
-def train_loss(model: GSTPP, ts: Float[Array, "N T"], ss: Float[Array, "N T loc_dim"], mask: Float[Array, "N T"], t0: float, t1: float):
+def train_loss(model, ts: Float[Array, "N T"], ss: Float[Array, "N T loc_dim"], mask: Float[Array, "N T"], t0: float, t1: float):
     out = jax.vmap(model.loss, (0, 0, 0, None, None), 0)(ts, ss, mask, t0, t1)[1].mean()
     # jax.debug.breakpoint()
     return out
 
-def lax_train_loss(model: GSTPP, ts: Float[Array, "N T"], ss: Float[Array, "N T loc_dim"], mask: Float[Array, "N T"], t0: float, t1: float):
+def lax_train_loss(model, ts: Float[Array, "N T"], ss: Float[Array, "N T loc_dim"], mask: Float[Array, "N T"], t0: float, t1: float):
     out = jax.vmap(model.loss_lax, (0, 0, 0, None, None), 0)(ts, ss, mask, t0, t1)[1].mean()
     # jax.debug.breakpoint()
     return out
 
-def lax_validate_ll(model: GSTPP, test_loader: torch.utils.data.DataLoader, t0: float, t1: float):
+def lax_validate_ll(model, test_loader: torch.utils.data.DataLoader, t0: float, t1: float):
     model = jax.tree.map(disable_gradient, model)
     model = eqx.nn.inference_mode(model)
     total_events = 0
@@ -45,7 +45,7 @@ def lax_validate_ll(model: GSTPP, test_loader: torch.utils.data.DataLoader, t0: 
     total_space_ll /= total_events
     return total_ll, total_time_ll, total_space_ll
 
-def validate_ll(model: GSTPP, test_loader: torch.utils.data.DataLoader, t0: float, t1: float):
+def validate_ll(model, test_loader: torch.utils.data.DataLoader, t0: float, t1: float):
     model = jax.tree.map(disable_gradient, model)
     model = eqx.nn.inference_mode(model)
     total_events = 0

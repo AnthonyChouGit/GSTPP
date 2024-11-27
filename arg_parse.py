@@ -5,7 +5,7 @@ def parse():
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--eval_batch_size', type=int, default=32)
     parser.add_argument('--val_steps', type=int, default=10)
-    parser.add_argument('--cuda', type=str, default='5')
+    parser.add_argument('--cuda', type=str, default='0')
     parser.add_argument('--dataname', type=str, default='covid19')
     parser.add_argument('--gdep', type=int, default=1)
     parser.add_argument('--hdim', type=int, default=32)
